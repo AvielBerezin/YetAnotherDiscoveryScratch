@@ -2,12 +2,14 @@ package aviel.discovery;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 public class Scratch {
     private record InstanceHandle(ByteBuffer data) {}
@@ -477,6 +479,28 @@ public class Scratch {
             })));
         }
 
+        FriendlySimpleDiscovery<Entity> filter(Predicate<Entity> predicate) {
+            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(translate(lsn -> mnw -> {
+                Set<InstanceHandle> filteredIn = Collections.synchronizedSet(new HashSet<>());
+                return new SimpleListener<>() {
+                    @Override
+                    public void onDiscovered(Entry<Entity> entity) {
+                        if (predicate.test(entity.value)) {
+                            filteredIn.add(entity.key);
+                            lsn.onDiscovered(entity);
+                        }
+                    }
+
+                    @Override
+                    public void onDisconnected(InstanceHandle instanceHandle) {
+                        if (filteredIn.remove(instanceHandle)) {
+                            lsn.onDisconnected(instanceHandle);
+                        }
+                    }
+                };
+            })));
+        }
+
         FriendlyEnrichedDiscovery<Entity> enrich() {
             return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(Scratch.enrich()));
         }
@@ -506,6 +530,14 @@ public class Scratch {
 
         <MEntity> FriendlyDiscoveredOnlyDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
             return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(mapDiscoveredOnlyEntity(mapper)));
+        }
+
+        FriendlyDiscoveredOnlyDiscovery<Entity> filter(Predicate<Entity> filter) {
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(translate(cns -> mnw -> entity -> {
+                if (filter.test(entity)) {
+                    cns.accept(entity);
+                }
+            })));
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> unduplicate() {
