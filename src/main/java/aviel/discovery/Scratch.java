@@ -73,10 +73,6 @@ public class Scratch {
         void close();
     }
 
-    interface DiscovererAssigner {
-
-    }
-
     interface AbstractDiscoverer {
         AbstractDiscoverer withWriters(Function<MetricNameWrapper, SimpleListener<EntityInfo>> listener);
         AbstractDiscoverer withReaders(Function<MetricNameWrapper, SimpleListener<EntityInfo>> listener);
