@@ -215,25 +215,11 @@ public class Scratch {
         return mnwToLsn -> discoverer -> discoverer.withWriters(mnwToLsn);
     }
 
-    static Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Consumer<EntityInfo>>> onlyDiscovered() {
+    private static <Listener> Reduction<Listener, Listener> identity() {
         return new Reduction<>() {
             @Override
-            public <Result> Function<Function<MetricNameWrapper, Consumer<EntityInfo>>, Result> transform(
-                    Function<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Result> problem) {
-                return mnwToCns -> problem.apply(mnw -> {
-                    Consumer<EntityInfo> cns = mnwToCns.apply(mnw);
-                    return new SimpleListener<>() {
-                        @Override
-                        public void onDiscovered(Entry<EntityInfo> entity) {
-                            cns.accept(entity.value);
-                        }
-
-                        @Override
-                        public void onDisconnected(InstanceHandle instanceHandle) {
-
-                        }
-                    };
-                });
+            public <Result> Function<Listener, Result> transform(Function<Listener, Result> problem) {
+                return problem;
             }
         };
     }
@@ -244,7 +230,7 @@ public class Scratch {
     }
 
     static <Entity> Reduction<Function<MetricNameWrapper, Consumer<Entity>>, Function<MetricNameWrapper, Consumer<Entity>>>
-    unduplicate() {
+    discoveredOnlyUnduplicate() {
         return new Reduction<>() {
             @Override
             public <Result> Function<Function<MetricNameWrapper, Consumer<Entity>>, Result> transform(
@@ -262,31 +248,23 @@ public class Scratch {
         };
     }
 
-
     static <Entity> Reduction<Function<MetricNameWrapper, SimpleListener<Entity>>, Function<MetricNameWrapper, EnrichedListener<Entity>>> enrich() {
-        return new Reduction<>() {
-            @Override
-            public <Result> Function<Function<MetricNameWrapper, EnrichedListener<Entity>>, Result> transform(
-                    Function<Function<MetricNameWrapper, SimpleListener<Entity>>, Result> problem) {
-                return mnwToLsn -> problem.apply(mnw -> {
-                    EnrichedListener<Entity> lsn = mnwToLsn.apply(mnw);
-                    HashMap<InstanceHandle, Entry<Entity>> entries = new HashMap<>();
-                    return new SimpleListener<>() {
-                        @Override
-                        public void onDiscovered(Entry<Entity> entity) {
-                            entries.put(entity.key, entity);
-                            lsn.onDiscovered(entity.value);
-                        }
+        return translate(lsn -> mnw -> {
+            HashMap<InstanceHandle, Entry<Entity>> entries = new HashMap<>();
+            return new SimpleListener<>() {
+                @Override
+                public void onDiscovered(Entry<Entity> entity) {
+                    entries.put(entity.key, entity);
+                    lsn.onDiscovered(entity.value);
+                }
 
-                        @Override
-                        public void onDisconnected(InstanceHandle instanceHandle) {
-                            Entry<Entity> removed = entries.remove(instanceHandle);
-                            lsn.onDisconnected(removed.value);
-                        }
-                    };
-                });
-            }
-        };
+                @Override
+                public void onDisconnected(InstanceHandle instanceHandle) {
+                    Entry<Entity> removed = entries.remove(instanceHandle);
+                    lsn.onDisconnected(removed.value);
+                }
+            };
+        });
     }
 
     static <Entity, MEntity> Reduction<Function<MetricNameWrapper, EnrichedListener<Entity>>, Function<MetricNameWrapper, EnrichedListener<MEntity>>>
@@ -306,32 +284,37 @@ public class Scratch {
 
     static <Entity> Reduction<Function<MetricNameWrapper, EnrichedListener<Entity>>, Function<MetricNameWrapper, EnrichedListener<Entity>>>
     enrichedUnduplicate() {
-        return new Reduction<>() {
-            @Override
-            public <Result> Function<Function<MetricNameWrapper, EnrichedListener<Entity>>, Result> transform(
-                    Function<Function<MetricNameWrapper, EnrichedListener<Entity>>, Result> problem) {
-                return mnwToLsn -> problem.apply(mnw -> {
-                    EnrichedListener<Entity> lsn = mnwToLsn.apply(mnw);
-                    HashMap<Entity, AtomicInteger> counts = new HashMap<>();
-                    return new EnrichedListener<>() {
-                        @Override
-                        public void onDiscovered(Entity entity) {
-                            counts.putIfAbsent(entity, new AtomicInteger(0));
-                            if (counts.get(entity).getAndIncrement() == 0) {
-                                lsn.onDiscovered(entity);
-                            }
-                        }
+        return translate(lsn -> mnw -> {
+            HashMap<Entity, AtomicInteger> counts = new HashMap<>();
+            return new EnrichedListener<Entity>() {
+                @Override
+                public void onDiscovered(Entity entity) {
+                    counts.putIfAbsent(entity, new AtomicInteger(0));
+                    if (counts.get(entity).getAndIncrement() == 0) {
+                        lsn.onDiscovered(entity);
+                    }
+                }
 
-                        @Override
-                        public void onDisconnected(Entity entity) {
-                            if (counts.get(entity).decrementAndGet() == 0) {
-                                lsn.onDisconnected(entity);
-                            }
-                        }
-                    };
-                });
+                @Override
+                public void onDisconnected(Entity entity) {
+                    if (counts.get(entity).decrementAndGet() == 0) {
+                        lsn.onDisconnected(entity);
+                    }
+                }
+            };
+        });
+    }
+
+    private static <Entity> Reduction<Function<MetricNameWrapper, SimpleListener<Entity>>, Function<MetricNameWrapper, Consumer<Entity>>> onlyDiscovered() {
+        return translate(cns -> mnw -> new SimpleListener<>() {
+            @Override
+            public void onDiscovered(Entry<Entity> entity) {
+                cns.accept(entity.value);
             }
-        };
+
+            @Override
+            public void onDisconnected(InstanceHandle instanceHandle) {}
+        });
     }
 
     static <ExtendedListener, PureListener> Reduction<Function<MetricNameWrapper, ExtendedListener>, Function<MetricNameWrapper, PureListener>>
@@ -397,54 +380,50 @@ public class Scratch {
             }
         };
         try (NTClosable discoveryCloser =
-                     Scratch.<EntityInfo>enrich()
-                            .transform(Scratch.writersDiscovery())
-                            .apply(metricNameWrapper -> new EnrichedListener<>() {
-                                @Override
-                                public void onDiscovered(EntityInfo entity) {
-                                    System.out.println("+W " + entity);
-                                }
+                     new FriendlyDiscovery()
+                             .enrich()
+                             .writers(metricNameWrapper -> new EnrichedListener<>() {
+                                 @Override
+                                 public void onDiscovered(EntityInfo entity) {
+                                     System.out.println("+W " + entity);
+                                 }
 
-                                @Override
-                                public void onDisconnected(EntityInfo entity) {
-                                    System.out.println("-W " + entity);
-                                }
-                            })
-                            .andThen(Scratch.<EntityInfo>enrich()
-                                            .transform(Scratch.readersDiscovery())
-                                            .apply(metricNameWrapper -> new EnrichedListener<>() {
-                                                @Override
-                                                public void onDiscovered(EntityInfo entity) {
-                                                    System.out.println("+R " + entity);
-                                                }
+                                 @Override
+                                 public void onDisconnected(EntityInfo entity) {
+                                     System.out.println("-W " + entity);
+                                 }
+                             })
+                             .enrich()
+                             .readers(metricNameWrapper -> new EnrichedListener<>() {
+                                 @Override
+                                 public void onDiscovered(EntityInfo entity) {
+                                     System.out.println("+R " + entity);
+                                 }
 
-                                                @Override
-                                                public void onDisconnected(EntityInfo entity) {
-                                                    System.out.println("-R " + entity);
-                                                }
-                                            }))
-                            .andThen(Scratch.<EntityInfo>enrich()
-                                            .compose(Scratch.mapEnrichedEntity(EntityInfo::topicName))
-                                            .compose(Scratch.enrichedUnduplicate())
-                                            .transform(Scratch.writersDiscovery())
-                                            .apply(metricNameWrapper -> new EnrichedListener<>() {
-                                                @Override
-                                                public void onDiscovered(String entity) {
-                                                    System.out.println("+WT " + entity);
-                                                }
+                                 @Override
+                                 public void onDisconnected(EntityInfo entity) {
+                                     System.out.println("-R " + entity);
+                                 }
+                             })
+                             .enrich()
+                             .map(EntityInfo::topicName)
+                             .unduplicate()
+                             .writers(metricNameWrapper -> new EnrichedListener<>() {
+                                 @Override
+                                 public void onDiscovered(String entity) {
+                                     System.out.println("+WT " + entity);
+                                 }
 
-                                                @Override
-                                                public void onDisconnected(String entity) {
-                                                    System.out.println("-WT " + entity);
-                                                }
-                                            }))
-                            .andThen(Scratch.onlyDiscovered()
-                                            .compose(mapDiscoveredOnlyEntity(entity -> entity.partition))
-                                            .compose(unduplicate())
-                                            .transform(Scratch.readersDiscovery())
-                                            .apply(metricNameWrapper -> partition -> System.out.println("+RP " + partition)))
-                            .apply(new DiscovererEmpty())
-                            .initiate(someVisibility)) {
+                                 @Override
+                                 public void onDisconnected(String entity) {
+                                     System.out.println("-WT " + entity);
+                                 }
+                             })
+                             .discoveredOnly()
+                             .map(EntityInfo::partition)
+                             .unduplicate()
+                             .readers(metricNameWrapper -> partition -> System.out.println("+RP " + partition))
+                             .initiate(someVisibility)) {
             int count = 50;
             System.out.printf("[%s]%n", " ".repeat(count));
             for (int i = 0; i < count; i++) {
@@ -456,23 +435,13 @@ public class Scratch {
         }
     }
 
-    static class FriendlyDiscovery {
-        final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
+    static class FriendlyDiscovery extends FriendlySimpleDiscovery<EntityInfo> {
+        public FriendlyDiscovery() {
+            this(Function.identity());
+        }
 
         FriendlyDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery) {
-            this.discovery = discovery;
-        }
-
-        FriendlyDiscovery readers(Function<MetricNameWrapper, SimpleListener<EntityInfo>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(discovery -> discovery.withReaders(mnwToLsn)));
-        }
-
-        FriendlyDiscovery writers(Function<MetricNameWrapper, SimpleListener<EntityInfo>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(discovery -> discovery.withWriters(mnwToLsn)));
-        }
-
-        FriendlyEnrichedDiscovery enrich() {
-            return new FriendlyEnrichedDiscovery(discovery);
+            super(discovery, identity());
         }
 
         NTClosable initiate(Visibility visibility) {
@@ -480,15 +449,98 @@ public class Scratch {
         }
     }
 
-    static class FriendlyEnrichedDiscovery {
+    static class FriendlySimpleDiscovery<Entity> {
         final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, SimpleListener<Entity>>> reduction;
 
-        FriendlyEnrichedDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery) {
+        FriendlySimpleDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
+                                Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, SimpleListener<Entity>>> reduction) {
             this.discovery = discovery;
+            this.reduction = reduction;
         }
 
-        FriendlyDiscovery readers(Function<MetricNameWrapper, EnrichedListener<EntityInfo> mnwToLsn) {
+        FriendlyDiscovery readers(Function<MetricNameWrapper, SimpleListener<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.readersDiscovery()).apply(mnwToLsn)));
+        }
 
+        FriendlyDiscovery writers(Function<MetricNameWrapper, SimpleListener<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.writersDiscovery()).apply(mnwToLsn)));
+        }
+
+        <MEntity> FriendlySimpleDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
+            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(translate(mLsn -> mnw -> new SimpleListener<>() {
+                @Override
+                public void onDiscovered(Entry<Entity> entity) {
+                    mLsn.onDiscovered(new Entry<>(entity.key, mapper.apply(entity.value)));
+                }
+
+                @Override
+                public void onDisconnected(InstanceHandle instanceHandle) {
+                    mLsn.onDisconnected(instanceHandle);
+                }
+            })));
+        }
+
+        FriendlyEnrichedDiscovery<Entity> enrich() {
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(Scratch.enrich()));
+        }
+
+        FriendlyDiscoveredOnlyDiscovery<Entity> discoveredOnly() {
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(onlyDiscovered()));
+        }
+    }
+
+    static class FriendlyDiscoveredOnlyDiscovery<Entity> {
+        final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Consumer<Entity>>> reduction;
+
+        FriendlyDiscoveredOnlyDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
+                                        Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Consumer<Entity>>> reduction) {
+            this.discovery = discovery;
+            this.reduction = reduction;
+        }
+
+        FriendlyDiscovery readers(Function<MetricNameWrapper, Consumer<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.readersDiscovery()).apply(mnwToLsn)));
+        }
+
+        FriendlyDiscovery writers(Function<MetricNameWrapper, Consumer<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.writersDiscovery()).apply(mnwToLsn)));
+        }
+
+        <MEntity> FriendlyDiscoveredOnlyDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(mapDiscoveredOnlyEntity(mapper)));
+        }
+
+        FriendlyDiscoveredOnlyDiscovery<Entity> unduplicate() {
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(discoveredOnlyUnduplicate()));
+        }
+    }
+
+    static class FriendlyEnrichedDiscovery<Entity> {
+        final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, EnrichedListener<Entity>>> reduction;
+
+        FriendlyEnrichedDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
+                                  Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, EnrichedListener<Entity>>> reduction) {
+            this.discovery = discovery;
+            this.reduction = reduction;
+        }
+
+        FriendlyDiscovery readers(Function<MetricNameWrapper, EnrichedListener<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.readersDiscovery()).apply(mnwToLsn)));
+        }
+
+        FriendlyDiscovery writers(Function<MetricNameWrapper, EnrichedListener<Entity>> mnwToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.writersDiscovery()).apply(mnwToLsn)));
+        }
+
+        <MEntity> FriendlyEnrichedDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(mapEnrichedEntity(mapper)));
+        }
+
+        FriendlyEnrichedDiscovery<Entity> unduplicate() {
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(enrichedUnduplicate()));
         }
     }
 }
