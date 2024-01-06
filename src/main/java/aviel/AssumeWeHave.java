@@ -1,7 +1,7 @@
 package aviel;
 
-import aviel.discovery.Scratch.NTClosable;
-import aviel.discovery.Scratch.SimpleListener;
+import aviel.discovery.DiscoveryBasics.NTClosable;
+import aviel.discovery.Listeners.SimpleListener;
 
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -65,15 +65,6 @@ public class AssumeWeHave {
         return new MetricNameWrapper() {};
     }
 
-    public static void loadingBar(int length, Duration duration) throws InterruptedException {
-        Duration step = duration.dividedBy(length);
-        System.out.printf("[%s]%n", " ".repeat(length));
-        for (int i = 0; i < length; i++) {
-            Thread.sleep(step.toMillis());
-            System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(length - i - 1));
-        }
-    }
-
     public enum EntityType {Reader, Writer}
 
     public enum Verbosity {
@@ -102,4 +93,13 @@ public class AssumeWeHave {
     public record EntityInfo(EntityType type,
                              String partition,
                              String topicName) {}
+
+    public static void loadingBar(int length, Duration duration) throws InterruptedException {
+        Duration step = duration.dividedBy(length);
+        System.out.printf("[%s]%n", " ".repeat(length));
+        for (int i = 0; i < length; i++) {
+            Thread.sleep(step.toMillis());
+            System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(length - i - 1));
+        }
+    }
 }
