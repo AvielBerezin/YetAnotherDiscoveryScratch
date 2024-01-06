@@ -14,8 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import static aviel.AssumeWeHave.createMetricReporter;
-import static aviel.AssumeWeHave.getDiscoveryMetricNamesWrapper;
+import static aviel.AssumeWeHave.*;
 
 public class Scratch {
     private static final Logger logger = Logger.getLogger(Scratch.class);
@@ -423,15 +422,6 @@ public class Scratch {
             loadingBar(100, Duration.ofSeconds(30));
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
-        }
-    }
-
-    private static void loadingBar(int length, Duration duration) throws InterruptedException {
-        Duration step = duration.dividedBy(length);
-        System.out.printf("[%s]%n", " ".repeat(length));
-        for (int i = 0; i < length; i++) {
-            Thread.sleep(step.toMillis());
-            System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(length - i - 1));
         }
     }
 

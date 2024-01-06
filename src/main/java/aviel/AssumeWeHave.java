@@ -4,6 +4,7 @@ import aviel.discovery.Scratch.NTClosable;
 import aviel.discovery.Scratch.SimpleListener;
 
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Executors;
@@ -62,6 +63,15 @@ public class AssumeWeHave {
 
     public static MetricNameWrapper getDiscoveryMetricNamesWrapper(ParticipantParams participantParams) {
         return new MetricNameWrapper() {};
+    }
+
+    public static void loadingBar(int length, Duration duration) throws InterruptedException {
+        Duration step = duration.dividedBy(length);
+        System.out.printf("[%s]%n", " ".repeat(length));
+        for (int i = 0; i < length; i++) {
+            Thread.sleep(step.toMillis());
+            System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(length - i - 1));
+        }
     }
 
     public enum EntityType {Reader, Writer}
