@@ -3,6 +3,7 @@ package aviel.discovery;
 import aviel.AssumeWeHave;
 import aviel.AssumeWeHave.EntityInfo;
 import aviel.discovery.DiscoveryBasics.NTClosable;
+import aviel.discovery.DiscoveryBasics.Visibility;
 import aviel.discovery.Listeners.EnrichedListener;
 import org.apache.log4j.Logger;
 
@@ -15,7 +16,7 @@ public class Main {
     private static final Logger logger = Logger.getLogger(Main.class);
 
     public static void main(String[] args) throws InterruptedException {
-        DiscoveryBasics.Visibility someVisibility = () -> AssumeWeHave::createDomainParticipant;
+        Visibility someVisibility = () -> AssumeWeHave::createDomainParticipant;
         try (NTClosable discoveryCloser =
                      friendlyDiscovery()
                              .enrich()
