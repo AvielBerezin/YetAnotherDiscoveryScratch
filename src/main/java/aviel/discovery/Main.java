@@ -14,7 +14,7 @@ import static aviel.discovery.Friendly.friendlyDiscovery;
 public class Main {
     private static final Logger logger = Logger.getLogger(Main.class);
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         DiscoveryBasics.Visibility someVisibility = () -> AssumeWeHave::createDomainParticipant;
         try (NTClosable discoveryCloser =
                      friendlyDiscovery()
@@ -62,8 +62,6 @@ public class Main {
                              .readers(metricNameWrapper -> partition -> logger.info("+RP " + partition))
                              .initiate(someVisibility)) {
             loadingBar(100, Duration.ofSeconds(20));
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
         }
     }
 }
