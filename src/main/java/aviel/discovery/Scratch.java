@@ -266,14 +266,14 @@ public class Scratch {
         return translate(mCns -> mr -> entity -> mCns.accept(mapper.apply(entity)));
     }
 
-    static <Entity> Reduction<Function<MetricNameWrapper, Consumer<Entity>>, Function<MetricNameWrapper, Consumer<Entity>>>
+    static <Entity> Reduction<Function<MetricReporter, Consumer<Entity>>, Function<MetricReporter, Consumer<Entity>>>
     discoveredOnlyUnduplicate() {
         return new Reduction<>() {
             @Override
-            public <Result> Function<Function<MetricNameWrapper, Consumer<Entity>>, Result> transform(
-                    Function<Function<MetricNameWrapper, Consumer<Entity>>, Result> problem) {
-                return mnwToCns -> problem.apply(mnw -> {
-                    Consumer<Entity> cns = mnwToCns.apply(mnw);
+            public <Result> Function<Function<MetricReporter, Consumer<Entity>>, Result> transform(
+                    Function<Function<MetricReporter, Consumer<Entity>>, Result> problem) {
+                return mnwToCns -> problem.apply(mr -> {
+                    Consumer<Entity> cns = mnwToCns.apply(mr);
                     Set<Entity> pures = new HashSet<>();
                     return entity -> {
                         if (pures.add(entity)) {
@@ -508,7 +508,7 @@ public class Scratch {
         }
 
         FriendlyDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery) {
-            super(discovery, identity());
+            super(discovery, Scratch.useMetricReporter(Verbosity.DEBUG));
         }
 
         NTClosable initiate(Visibility visibility) {
@@ -518,128 +518,118 @@ public class Scratch {
 
     static class FriendlySimpleDiscovery<Entity> {
         final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
-        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, SimpleListener<Entity>>> reduction;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, SimpleListener<Entity>>>> reduction;
 
         FriendlySimpleDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
-                                Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, SimpleListener<Entity>>> reduction) {
+                                Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, SimpleListener<Entity>>>> reduction) {
             this.discovery = discovery;
             this.reduction = reduction;
         }
 
         FriendlyDiscovery readers(Function<MetricReporter, SimpleListener<Entity>> mrToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.compose(useMetricReporter(Verbosity.INFO))
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
                                                                     .transform(Scratch.readersDiscovery())
                                                                     .apply(mnw -> mrToLsn)));
         }
 
         FriendlyDiscovery writers(Function<MetricReporter, SimpleListener<Entity>> mrToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.compose(useMetricReporter(Verbosity.INFO))
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
                                                                     .transform(Scratch.writersDiscovery())
                                                                     .apply(mnw -> mrToLsn)));
         }
 
         <MEntity> FriendlySimpleDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
-            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                                     .compose(ignoreParameter(mapSimpleListener(mapper)))
-                                                                     .compose(omitMetricReporter()));
+            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(ignoreParameter(mapSimpleListener(mapper))));
         }
 
         FriendlySimpleDiscovery<Entity> filter(Predicate<Entity> predicate) {
-            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                                     .compose(ignoreParameter(filterSimpleListener(predicate)))
-                                                                     .compose(omitMetricReporter()));
+            return new FriendlySimpleDiscovery<>(discovery, reduction.compose(ignoreParameter(filterSimpleListener(predicate))));
+
         }
 
         FriendlyEnrichedDiscovery<Entity> enrich() {
-            return new FriendlyEnrichedDiscovery<>(discovery,
-                                                   reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                            .compose(ignoreParameter(Scratch.enrich()))
-                                                            .compose(omitMetricReporter()));
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(ignoreParameter(Scratch.enrich())));
+
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> discoveredOnly() {
-            return new FriendlyDiscoveredOnlyDiscovery<>(discovery,
-                                                         reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                                  .compose(ignoreParameter(onlyDiscovered()))
-                                                                  .compose(omitMetricReporter()));
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(onlyDiscovered())));
         }
     }
 
     static class FriendlyDiscoveredOnlyDiscovery<Entity> {
         final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
-        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Consumer<Entity>>> reduction;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, Consumer<Entity>>>> reduction;
 
         FriendlyDiscoveredOnlyDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
-                                        Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Consumer<Entity>>> reduction) {
+                                        Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, Consumer<Entity>>>> reduction) {
             this.discovery = discovery;
             this.reduction = reduction;
         }
 
         FriendlyDiscovery readers(Function<MetricReporter, Consumer<Entity>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.compose(useMetricReporter(Verbosity.INFO))
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
                                                                     .transform(Scratch.readersDiscovery())
                                                                     .apply(mnw -> mnwToLsn)));
         }
 
         FriendlyDiscovery writers(Function<MetricReporter, Consumer<Entity>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.compose(useMetricReporter(Verbosity.INFO))
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
                                                                     .transform(Scratch.writersDiscovery())
                                                                     .apply(mnw -> mnwToLsn)));
         }
 
         <MEntity> FriendlyDiscoveredOnlyDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
-            return new FriendlyDiscoveredOnlyDiscovery<>(discovery,
-                                                         reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                                  .compose(ignoreParameter(mapDiscoveredOnlyEntity(mapper)))
-                                                                  .compose(omitMetricReporter()));
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(mapDiscoveredOnlyEntity(mapper))));
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> filter(Predicate<Entity> filter) {
-            return new FriendlyDiscoveredOnlyDiscovery<>(discovery,
-                                                         reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                                  .compose(ignoreParameter(Scratch.<Consumer<Entity>, Consumer<Entity>>translate(cns -> mr -> entity -> {
-                                                                      if (filter.test(entity)) {
-                                                                          cns.accept(entity);
-                                                                      }
-                                                                  })))
-                                                                  .compose(omitMetricReporter()));
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(Scratch.translate(cns -> mr -> entity -> {
+                if (filter.test(entity)) {
+                    cns.accept(entity);
+                }
+            }))));
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> unduplicate() {
-            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(discoveredOnlyUnduplicate()));
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(discoveredOnlyUnduplicate())));
         }
     }
 
     static class FriendlyEnrichedDiscovery<Entity> {
         final Function<AbstractDiscoverer, AbstractDiscoverer> discovery;
-        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, EnrichedListener<Entity>>> reduction;
+        final Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, EnrichedListener<Entity>>>> reduction;
 
         FriendlyEnrichedDiscovery(Function<AbstractDiscoverer, AbstractDiscoverer> discovery,
-                                  Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, EnrichedListener<Entity>>> reduction) {
+                                  Reduction<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<MetricNameWrapper, Function<MetricReporter, EnrichedListener<Entity>>>> reduction) {
             this.discovery = discovery;
             this.reduction = reduction;
         }
 
-        FriendlyDiscovery readers(Function<MetricNameWrapper, EnrichedListener<Entity>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.readersDiscovery()).apply(mnwToLsn)));
+        FriendlyDiscovery readers(Function<MetricReporter, EnrichedListener<Entity>> mrToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
+                                                                    .transform(Scratch.readersDiscovery())
+                                                                    .apply(mnw -> mrToLsn)));
         }
 
-        FriendlyDiscovery writers(Function<MetricNameWrapper, EnrichedListener<Entity>> mnwToLsn) {
-            return new FriendlyDiscovery(discovery.andThen(reduction.transform(Scratch.writersDiscovery()).apply(mnwToLsn)));
+        FriendlyDiscovery writers(Function<MetricReporter, EnrichedListener<Entity>> mrToLsn) {
+            return new FriendlyDiscovery(discovery.andThen(reduction.compose(omitMetricReporter())
+                                                                    .compose(useMetricReporter(Verbosity.INFO))
+                                                                    .transform(Scratch.writersDiscovery())
+                                                                    .apply(mnw -> mrToLsn)));
         }
 
         <MEntity> FriendlyEnrichedDiscovery<MEntity> map(Function<Entity, MEntity> mapper) {
-            return new FriendlyEnrichedDiscovery<>(discovery,
-                                                   reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                            .compose(ignoreParameter(mapEnrichedEntity(mapper)))
-                                                            .compose(omitMetricReporter()));
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(ignoreParameter(mapEnrichedEntity(mapper))));
         }
 
         FriendlyEnrichedDiscovery<Entity> unduplicate() {
-            return new FriendlyEnrichedDiscovery<>(discovery,
-                                                   reduction.compose(useMetricReporter(Verbosity.DEBUG))
-                                                            .compose(ignoreParameter(enrichedUnduplicate()))
-                                                            .compose(omitMetricReporter()));
+            return new FriendlyEnrichedDiscovery<>(discovery, reduction.compose(ignoreParameter(enrichedUnduplicate())));
         }
     }
 }
