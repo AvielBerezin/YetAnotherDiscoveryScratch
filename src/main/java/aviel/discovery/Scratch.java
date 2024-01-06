@@ -354,13 +354,6 @@ public class Scratch {
         };
     }
 
-    static <Listener> Function<AbstractDiscoverer, AbstractDiscoverer>
-    applyDiscovery(Reduction<Function<MetricReporter, SimpleListener<EntityInfo>>, Function<MetricReporter, Listener>> reduction,
-                   Function<MetricReporter, Listener> listener,
-                   Function<Function<MetricReporter, SimpleListener<EntityInfo>>, Function<AbstractDiscoverer, AbstractDiscoverer>> discoveryInitiator) {
-        return reduction.transform(discoveryInitiator).apply(listener);
-    }
-
     public static void main(String[] args) {
         Random random = new Random();
 
