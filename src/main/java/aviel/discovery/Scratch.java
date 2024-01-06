@@ -218,15 +218,6 @@ public class Scratch {
         return mnwToLsn -> discoverer -> discoverer.withWriters(mnwToLsn);
     }
 
-    private static <Listener> Reduction<Listener, Listener> identity() {
-        return new Reduction<>() {
-            @Override
-            public <Result> Function<Listener, Result> transform(Function<Listener, Result> problem) {
-                return problem;
-            }
-        };
-    }
-
     static <Listener> Reduction<Function<MetricNameWrapper, Listener>, Function<MetricNameWrapper, Function<MetricReporter, Listener>>>
     useMetricReporter(Verbosity verbosity) {
         return new Reduction<>() {
