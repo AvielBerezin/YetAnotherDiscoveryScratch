@@ -16,6 +16,19 @@ import java.util.function.Predicate;
 import static aviel.AssumeWeHave.*;
 
 public class Reductions {
+    public interface Reduction<Value1, Value2> {
+        <Result> Function<Value2, Result> transform(Function<Value1, Result> problem);
+
+        default <Value3> Reduction<Value1, Value3> compose(Reduction<Value2, Value3> reduction2To3) {
+            return new Reduction<>() {
+                @Override
+                public <Result> Function<Value3, Result> transform(Function<Value1, Result> problem1) {
+                    return reduction2To3.transform(Reduction.this.transform(problem1));
+                }
+            };
+        }
+    }
+
     public static <Listener> Reduction<Function<MetricNameWrapper, Listener>, Function<MetricNameWrapper, Function<MetricReporter, Listener>>>
     useMetricReporter(Verbosity verbosity) {
         return new Reduction<>() {
@@ -197,18 +210,5 @@ public class Reductions {
                 return vMnwToLsn -> problem.apply(mr -> extract.apply(vMnwToLsn.apply(mr)).apply(mr));
             }
         };
-    }
-
-    public interface Reduction<Value1, Value2> {
-        <Result> Function<Value2, Result> transform(Function<Value1, Result> problem);
-
-        default <Value3> Reduction<Value1, Value3> compose(Reduction<Value2, Value3> reduction2To3) {
-            return new Reduction<>() {
-                @Override
-                public <Result> Function<Value3, Result> transform(Function<Value1, Result> problem1) {
-                    return reduction2To3.transform(Reduction.this.transform(problem1));
-                }
-            };
-        }
     }
 }
