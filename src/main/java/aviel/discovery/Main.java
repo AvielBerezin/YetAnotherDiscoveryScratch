@@ -19,8 +19,8 @@ public class Main {
         Visibility someVisibility = () -> AssumeWeHave::createDomainParticipant;
         try (NTClosable discoveryCloser =
                      friendlyDiscovery()
-                             .enrich()
-                             .writers(metricNameWrapper -> new EnrichedListener<>() {
+                             .enrich() // add data on disconnection (ie smart)
+                             .writers(metricNameWrapper -> new EnrichedListener<>() { // assign the listener
                                  @Override
                                  public void onDiscovered(EntityInfo entity) {
                                      logger.info("+W " + entity);
@@ -31,8 +31,8 @@ public class Main {
                                      logger.info("-W " + entity);
                                  }
                              })
-                             .enrich()
-                             .readers(metricNameWrapper -> new EnrichedListener<>() {
+                             .enrich() // add data on disconnection (ie smart)
+                             .readers(metricNameWrapper -> new EnrichedListener<>() { // assign the listener
                                  @Override
                                  public void onDiscovered(EntityInfo entity) {
                                      logger.info("+R " + entity);
@@ -43,24 +43,25 @@ public class Main {
                                      logger.info("-R " + entity);
                                  }
                              })
-                             .enrich()
+                             .enrich() // add data on disconnection (ie smart)
                              .map(EntityInfo::topicName)
-                             .unduplicate()
-                             .writers(metricNameWrapper -> new EnrichedListener<>() {
+                             .unduplicate() // onDiscovered we only want notification for the first writer to appear on the topic
+                             //                and on disconnection we only want a notification for the last writer to leave the topic
+                             .writers(metricNameWrapper -> new EnrichedListener<>() { // assign the listener
                                  @Override
-                                 public void onDiscovered(String entity) {
-                                     logger.info("+WT " + entity);
+                                 public void onDiscovered(String topicName) {
+                                     logger.info("+WT " + topicName);
                                  }
 
                                  @Override
-                                 public void onDisconnected(String entity) {
-                                     logger.info("-WT " + entity);
+                                 public void onDisconnected(String topicName) {
+                                     logger.info("-WT " + topicName);
                                  }
                              })
-                             .discoveredOnly()
+                             .discoveredOnly() // we don't care about disconnection
                              .map(EntityInfo::partition)
-                             .unduplicate()
-                             .readers(metricNameWrapper -> partition -> logger.info("+RP " + partition))
+                             .unduplicate() // we only want a notification for the first ever reader appearing on a partition
+                             .readers(metricNameWrapper -> partition -> logger.info("+RP " + partition)) // assign the listener
                              .initiate(someVisibility)) {
             loadingBar(100, Duration.ofSeconds(20));
         }
