@@ -1,19 +1,26 @@
 package aviel.discovery;
 
-import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import aviel.AssumeWeHave;
+import aviel.AssumeWeHave.*;
+import org.apache.log4j.Logger;
+
+import java.time.Duration;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-public class Scratch {
-    private record InstanceHandle(ByteBuffer data) {}
+import static aviel.AssumeWeHave.createMetricReporter;
+import static aviel.AssumeWeHave.getDiscoveryMetricNamesWrapper;
 
-    interface SimpleListener<Value> {
+public class Scratch {
+    private static final Logger logger = Logger.getLogger(Scratch.class);
+
+    public interface SimpleListener<Value> {
         void onDiscovered(Entry<Value> entity);
         void onDisconnected(InstanceHandle instanceHandle);
     }
@@ -22,17 +29,6 @@ public class Scratch {
         void onDiscovered(Value entity);
         void onDisconnected(Value entity);
     }
-
-    private record Entry<Value>(InstanceHandle key,
-                                Value value) {}
-
-    private enum EntityType {Reader, Writer}
-
-    private record EntityInfo(EntityType type,
-                              String partition,
-                              String topicName) {}
-
-    interface MetricNameWrapper {}
 
     interface Reduction<Value1, Value2> {
         <Result> Function<Value2, Result> transform(Function<Value1, Result> problem);
@@ -47,35 +43,11 @@ public class Scratch {
         }
     }
 
-    interface ParticipantParams {
-        DomainParticipant createDomainParticipant();
-    }
-
-    enum Verbosity {
-        INFO, DEBUG
-    }
-
-    static MetricNameWrapper getDiscoveryMetricNamesWrapper(ParticipantParams participantParams) {
-        return new MetricNameWrapper() {};
-    }
-
-    interface MetricReporter {}
-
-    static MetricReporter createMetricReporter(MetricNameWrapper metricNameWrapper, Verbosity verbosity) {
-        return new MetricReporter() {};
-    }
-
-    interface DomainParticipant extends NTClosable {
-        void openDiscoveryOnWriters(SimpleListener<EntityInfo> listener);
-        void openDiscoveryOnReaders(SimpleListener<EntityInfo> listener);
-        void close();
-    }
-
     interface Visibility {
         ParticipantParams createParticipantParams();
     }
 
-    interface NTClosable extends AutoCloseable {
+    public interface NTClosable extends AutoCloseable {
         @Override
         void close();
     }
@@ -244,7 +216,7 @@ public class Scratch {
         return translate(cns -> mr -> new SimpleListener<>() {
             @Override
             public void onDiscovered(Entry<Entity> entity) {
-                cns.accept(entity.value);
+                cns.accept(entity.value());
             }
 
             @Override
@@ -255,6 +227,14 @@ public class Scratch {
     static <Entity, MEntity> Reduction<Function<MetricReporter, Consumer<Entity>>, Function<MetricReporter, Consumer<MEntity>>>
     mapDiscoveredOnlyEntity(Function<Entity, MEntity> mapper) {
         return translate(mCns -> mr -> entity -> mCns.accept(mapper.apply(entity)));
+    }
+
+    private static <Entity> Reduction<Function<MetricReporter, Consumer<Entity>>, Function<MetricReporter, Consumer<Entity>>> filterDiscoveredOnlyEntity(Predicate<Entity> filter) {
+        return Scratch.translate(cns -> mr -> entity -> {
+            if (filter.test(entity)) {
+                cns.accept(entity);
+            }
+        });
     }
 
     static <Entity> Reduction<Function<MetricReporter, Consumer<Entity>>, Function<MetricReporter, Consumer<Entity>>>
@@ -283,14 +263,14 @@ public class Scratch {
             return new SimpleListener<>() {
                 @Override
                 public void onDiscovered(Entry<Entity> entity) {
-                    entries.put(entity.key, entity);
-                    lsn.onDiscovered(entity.value);
+                    entries.put(entity.key(), entity);
+                    lsn.onDiscovered(entity.value());
                 }
 
                 @Override
                 public void onDisconnected(InstanceHandle instanceHandle) {
                     Entry<Entity> removed = entries.remove(instanceHandle);
-                    lsn.onDisconnected(removed.value);
+                    lsn.onDisconnected(removed.value());
                 }
             };
         });
@@ -339,7 +319,7 @@ public class Scratch {
         return Scratch.translate(mLsn -> mr -> new SimpleListener<>() {
             @Override
             public void onDiscovered(Entry<Entity> entity) {
-                mLsn.onDiscovered(new Entry<>(entity.key, mapper.apply(entity.value)));
+                mLsn.onDiscovered(new Entry<>(entity.key(), mapper.apply(entity.value())));
             }
 
             @Override
@@ -356,8 +336,8 @@ public class Scratch {
             return new SimpleListener<>() {
                 @Override
                 public void onDiscovered(Entry<Entity> entity) {
-                    if (predicate.test(entity.value)) {
-                        filteredIn.add(entity.key);
+                    if (predicate.test(entity.value())) {
+                        filteredIn.add(entity.key());
                         lsn.onDiscovered(entity);
                     }
                 }
@@ -394,73 +374,31 @@ public class Scratch {
     }
 
     public static void main(String[] args) {
-        Random random = new Random();
-
-        Visibility someVisibility = () -> () -> new DomainParticipant() {
-            boolean closed = false;
-            final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, r -> {
-                Thread thread = Executors.defaultThreadFactory().newThread(r);
-                thread.setDaemon(true);
-                return thread;
-            });
-
-            private void startDiscovery(EntityType entityType, SimpleListener<EntityInfo> listener) {
-                scheduler.schedule(() -> {
-                    if (closed) return;
-                    byte[] array = new byte[4];
-                    random.nextBytes(array);
-                    InstanceHandle key = new InstanceHandle(ByteBuffer.wrap(array));
-                    listener.onDiscovered(new Entry<>(key,
-                                                      new EntityInfo(entityType,
-                                                                     List.of("hi", "bye", "die").get(random.nextInt(3)),
-                                                                     List.of("Shuly", "rooly", "gooly").get(random.nextInt(3)))));
-                    scheduler.schedule(() -> {
-                        if (closed) return;
-                        listener.onDisconnected(key);
-                    }, random.nextInt(5000), TimeUnit.MILLISECONDS);
-                    startDiscovery(entityType, listener);
-                }, random.nextInt(1000), TimeUnit.MILLISECONDS);
-            }
-
-            @Override
-            public void openDiscoveryOnWriters(SimpleListener<EntityInfo> listener) {
-                startDiscovery(EntityType.Writer, listener);
-            }
-
-            @Override
-            public void openDiscoveryOnReaders(SimpleListener<EntityInfo> listener) {
-                startDiscovery(EntityType.Reader, listener);
-            }
-
-            @Override
-            public void close() {
-                closed = true;
-            }
-        };
+        Visibility someVisibility = () -> AssumeWeHave::createDomainParticipant;
         try (NTClosable discoveryCloser =
                      new FriendlyDiscovery()
                              .enrich()
                              .writers(metricNameWrapper -> new EnrichedListener<>() {
                                  @Override
                                  public void onDiscovered(EntityInfo entity) {
-                                     System.out.println("+W " + entity);
+                                     logger.info("+W " + entity);
                                  }
 
                                  @Override
                                  public void onDisconnected(EntityInfo entity) {
-                                     System.out.println("-W " + entity);
+                                     logger.info("-W " + entity);
                                  }
                              })
                              .enrich()
                              .readers(metricNameWrapper -> new EnrichedListener<>() {
                                  @Override
                                  public void onDiscovered(EntityInfo entity) {
-                                     System.out.println("+R " + entity);
+                                     logger.info("+R " + entity);
                                  }
 
                                  @Override
                                  public void onDisconnected(EntityInfo entity) {
-                                     System.out.println("-R " + entity);
+                                     logger.info("-R " + entity);
                                  }
                              })
                              .enrich()
@@ -469,27 +407,31 @@ public class Scratch {
                              .writers(metricNameWrapper -> new EnrichedListener<>() {
                                  @Override
                                  public void onDiscovered(String entity) {
-                                     System.out.println("+WT " + entity);
+                                     logger.info("+WT " + entity);
                                  }
 
                                  @Override
                                  public void onDisconnected(String entity) {
-                                     System.out.println("-WT " + entity);
+                                     logger.info("-WT " + entity);
                                  }
                              })
                              .discoveredOnly()
                              .map(EntityInfo::partition)
                              .unduplicate()
-                             .readers(metricNameWrapper -> partition -> System.out.println("+RP " + partition))
+                             .readers(metricNameWrapper -> partition -> logger.info("+RP " + partition))
                              .initiate(someVisibility)) {
-            int count = 50;
-            System.out.printf("[%s]%n", " ".repeat(count));
-            for (int i = 0; i < count; i++) {
-                Thread.sleep(500);
-                System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(count - i - 1));
-            }
+            loadingBar(100, Duration.ofSeconds(30));
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private static void loadingBar(int length, Duration duration) throws InterruptedException {
+        Duration step = duration.dividedBy(length);
+        System.out.printf("[%s]%n", " ".repeat(length));
+        for (int i = 0; i < length; i++) {
+            Thread.sleep(step.toMillis());
+            System.out.printf("[%s%s]%n", "x".repeat(i + 1), " ".repeat(length - i - 1));
         }
     }
 
@@ -579,11 +521,7 @@ public class Scratch {
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> filter(Predicate<Entity> filter) {
-            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(Scratch.translate(cns -> mr -> entity -> {
-                if (filter.test(entity)) {
-                    cns.accept(entity);
-                }
-            }))));
+            return new FriendlyDiscoveredOnlyDiscovery<>(discovery, reduction.compose(ignoreParameter(filterDiscoveredOnlyEntity(filter))));
         }
 
         FriendlyDiscoveredOnlyDiscovery<Entity> unduplicate() {
