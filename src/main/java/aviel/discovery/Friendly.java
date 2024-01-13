@@ -68,6 +68,10 @@ public class Friendly {
             return assignListener(writersDiscovery(), mrToLsn);
         }
 
+        public FriendlyInitial allEntities(Function<MetricReporter, Listener> mrToLsn) {
+            return assignListener(mnwToLsn -> readersDiscovery().apply(mnwToLsn).andThen(writersDiscovery().apply(mnwToLsn)), mrToLsn);
+        }
+
         private FriendlyInitial
         assignListener(Function<Function<MetricNameWrapper, SimpleListener<EntityInfo>>, Function<AbstractDiscoverer, AbstractDiscoverer>> discoveryListenerAssigner,
                        Function<MetricReporter, Listener> mrToLsn) {
