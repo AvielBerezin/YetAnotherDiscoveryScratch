@@ -1,6 +1,5 @@
 package aviel.discovery;
 
-import aviel.AssumeWeHave.*;
 import aviel.discovery.Listeners.EnrichedListener;
 import aviel.discovery.Listeners.SimpleListener;
 
@@ -155,17 +154,22 @@ public class Reductions {
 
     public static <Entity, MEntity> Reduction<Function<MetricReporter, SimpleListener<Entity>>, Function<MetricReporter, SimpleListener<MEntity>>>
     mapSimpleListener(Function<Entity, MEntity> mapper) {
-        return translate(mLsn -> mr -> new SimpleListener<>() {
+        return translate(mLsn -> mr -> translateSimpleListener(mLsn, mapper));
+    }
+
+    public static <Entity, MEntity> SimpleListener<Entity> translateSimpleListener(SimpleListener<MEntity> lsn,
+                                                                                   Function<Entity, MEntity> mapper) {
+        return new SimpleListener<>() {
             @Override
             public void onDiscovered(Entry<Entity> entity) {
-                mLsn.onDiscovered(new Entry<>(entity.key(), mapper.apply(entity.value())));
+                lsn.onDiscovered(new Entry<>(entity.key(), mapper.apply(entity.value())));
             }
 
             @Override
             public void onDisconnected(InstanceHandle instanceHandle) {
-                mLsn.onDisconnected(instanceHandle);
+                lsn.onDisconnected(instanceHandle);
             }
-        });
+        };
     }
 
     public static <Entity> Reduction<Function<MetricReporter, SimpleListener<Entity>>, Function<MetricReporter, SimpleListener<Entity>>>
